@@ -50,3 +50,4 @@ next-env.d.ts
    # Add to .gitignore
    api/processed/*.mp4
    api/downloads/*.mp4
+.vercel

@@ -6,7 +6,7 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
 export async function GET(
   req: NextRequest,
   { params }: { params: { path: string[] } }
-) {
+): Promise<NextResponse> {
   try {
     const { path } = params;
 
