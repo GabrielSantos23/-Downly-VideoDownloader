@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import {
@@ -106,6 +106,10 @@ export default function AudioDownloadCard({
     useState<AudioFormat | null>(null);
   const [showSummaryAndDownload, setShowSummaryAndDownload] = useState(false);
   const audioDropdownRef = useRef<HTMLDivElement>(null);
+  const [downloadStartTime, setDownloadStartTime] = useState<Date | null>(null);
+  const [deleteTimeout, setDeleteTimeout] = useState<NodeJS.Timeout | null>(
+    null
+  );
 
   // Update our form when parent values change
   React.useEffect(() => {
@@ -208,22 +212,33 @@ export default function AudioDownloadCard({
 
   // Handle quick trim selections
   const handleQuickTrim = (type: "full" | "first30" | "last30") => {
-    if (!videoInfo || !videoInfo.duration) return;
+    if (!videoInfo || !videoInfo.duration) {
+      toast.error("Video duration information not available");
+      return;
+    }
 
     const duration = videoInfo.duration;
+    const durationFormatted = formatDuration(duration);
 
     if (type === "full") {
       setValue("trim_start", "00:00");
-      setValue("trim_end", formatDuration(duration));
+      setValue("trim_end", durationFormatted);
+      parentSetValue("trim_start", "00:00");
+      parentSetValue("trim_end", durationFormatted);
       toast.success("Set to full audio duration");
     } else if (type === "first30") {
       setValue("trim_start", "00:00");
-      setValue("trim_end", formatDuration(Math.min(30, duration)));
+      const endTime = Math.min(30, duration);
+      setValue("trim_end", formatDuration(endTime));
+      parentSetValue("trim_start", "00:00");
+      parentSetValue("trim_end", formatDuration(endTime));
       toast.success("Set to first 30 seconds");
     } else if (type === "last30") {
       const lastThirtyStart = Math.max(0, duration - 30);
       setValue("trim_start", formatDuration(lastThirtyStart));
-      setValue("trim_end", formatDuration(duration));
+      setValue("trim_end", durationFormatted);
+      parentSetValue("trim_start", formatDuration(lastThirtyStart));
+      parentSetValue("trim_end", durationFormatted);
       toast.success("Set to last 30 seconds");
     }
   };
@@ -269,6 +284,80 @@ export default function AudioDownloadCard({
     })();
   };
 
+  // Schedule file deletion
+  const scheduleFileDeletion = (fileUrl: string) => {
+    // Get the file path from the URL
+    const urlParts = fileUrl.split("/");
+    let filePath = "";
+
+    if (fileUrl.includes("/api/downloads/")) {
+      // Extract the path after /api/downloads/
+      filePath = urlParts.slice(urlParts.indexOf("downloads") + 1).join("/");
+    } else if (fileUrl.includes("/api/processed/")) {
+      // Extract the path after /api/processed/
+      filePath = urlParts.slice(urlParts.indexOf("processed") + 1).join("/");
+    }
+
+    if (!filePath) return;
+
+    // Cancel any existing timeout
+    if (deleteTimeout) {
+      clearTimeout(deleteTimeout);
+    }
+
+    // Set a new timeout - 5 minutes (300000 ms)
+    const timeout = setTimeout(async () => {
+      try {
+        const isDownloadUrl = fileUrl.includes("/api/downloads/");
+        const deleteUrl = isDownloadUrl
+          ? `/api/downloads/delete/${filePath}`
+          : `/api/processed/delete/${filePath}`;
+
+        const response = await fetch(deleteUrl, {
+          method: "DELETE",
+        });
+
+        if (response.ok) {
+          console.log("File deleted automatically after 5 minutes");
+          setTaskStatus(null);
+          setTaskId(null);
+        } else {
+          console.error("Failed to delete file automatically");
+        }
+      } catch (error) {
+        console.error("Error in auto-delete:", error);
+      }
+    }, 300000); // 5 minutes
+
+    setDeleteTimeout(timeout);
+    setDownloadStartTime(new Date());
+  };
+
+  // Clean up the timeout when component unmounts
+  useEffect(() => {
+    return () => {
+      if (deleteTimeout) {
+        clearTimeout(deleteTimeout);
+      }
+    };
+  }, [deleteTimeout]);
+
+  // Calculate remaining time for deletion
+  const getRemainingDeletionTime = () => {
+    if (!downloadStartTime) return null;
+
+    const now = new Date();
+    const elapsedMs = now.getTime() - downloadStartTime.getTime();
+    const remainingMs = 300000 - elapsedMs; // 5 minutes in ms
+
+    if (remainingMs <= 0) return null;
+
+    const minutes = Math.floor(remainingMs / 60000);
+    const seconds = Math.floor((remainingMs % 60000) / 1000);
+
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
   // Poll task status
   const pollTaskStatus = (taskId: string) => {
     const interval = setInterval(async () => {
@@ -286,6 +375,9 @@ export default function AudioDownloadCard({
 
           if (status.status === "completed") {
             toast.success("Audio download ready!");
+            if (status.download_url) {
+              scheduleFileDeletion(status.download_url);
+            }
           } else {
             toast.error("Audio download failed");
           }
@@ -527,13 +619,19 @@ export default function AudioDownloadCard({
                   <>
                     {taskStatus?.status === "completed" &&
                       taskStatus?.download_url && (
-                        <div className="flex justify-center w-full">
+                        <div className="flex flex-col gap-2 w-full">
                           <Button asChild variant="default" className="w-full">
                             <a href={taskStatus.download_url} download>
                               <Download className="w-4 h-4 mr-1" />
                               Download Audio File
                             </a>
                           </Button>
+                          {downloadStartTime && (
+                            <p className="text-xs text-muted-foreground text-center">
+                              File will be deleted in{" "}
+                              {getRemainingDeletionTime() || "0:00"}
+                            </p>
+                          )}
                         </div>
                       )}
                   </>

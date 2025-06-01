@@ -21,7 +21,7 @@ export async function DELETE(
     const filePath = path.join("/");
 
     // Forward the request to the FastAPI backend
-    const response = await fetch(`${API_BASE_URL}/downloads/${filePath}`, {
+    const response = await fetch(`${API_BASE_URL}/processed/${filePath}`, {
       method: "DELETE",
     });
 
