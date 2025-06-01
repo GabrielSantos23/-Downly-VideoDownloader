@@ -45,3 +45,8 @@ next-env.d.ts
 /api/processed/
 /__pycache__/
 /api/__pycache__/
+
+
+   # Add to .gitignore
+   api/processed/*.mp4
+   api/downloads/*.mp4
