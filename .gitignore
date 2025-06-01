@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# api downloads and processed files
+/api/downloads/
+/api/processed/
+/__pycache__/
+/api/__pycache__/
