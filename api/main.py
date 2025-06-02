@@ -116,14 +116,32 @@ class TaskStatus(BaseModel):
 def run_subprocess_sync(command):
     """Synchronous subprocess wrapper for thread pool"""
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)  # Increased timeout to 60 seconds
+        
+        # Log the error if there is one
+        if result.returncode != 0 and result.stderr:
+            logger.error(f"Command failed: {' '.join(command)}")
+            logger.error(f"Error output: {result.stderr}")
+            
         return result
     except subprocess.TimeoutExpired:
-        logger.error(f"Command timed out: {' '.join(command)}")
-        raise
+        logger.error(f"Command timed out after 60 seconds: {' '.join(command)}")
+        # Create a result object with timeout info
+        class TimeoutResult:
+            def __init__(self):
+                self.returncode = 1
+                self.stdout = ""
+                self.stderr = "Command timed out after 60 seconds"
+        return TimeoutResult()
     except Exception as e:
         logger.error(f"Subprocess error: {e}")
-        raise
+        # Create a result object with the error
+        class ErrorResult:
+            def __init__(self, error):
+                self.returncode = 1
+                self.stdout = ""
+                self.stderr = f"Error: {str(error)}"
+        return ErrorResult(e)
 
 async def get_video_info_async(url: str):
     """Async wrapper for video info fetching with detailed format information"""
@@ -140,8 +158,9 @@ async def get_video_info_async(url: str):
         # Add additional options to help with extraction
         "--force-ipv4",
         "--extractor-args", "youtube:player_client=web",
-        # Add cookies options
-        "--cookies-from-browser", "chrome",
+        # Geo bypass and other helpful options
+        "--geo-bypass",
+        "--no-check-certificate",
         str(url)
     ]
     
@@ -154,7 +173,7 @@ async def get_video_info_async(url: str):
         
         if result.returncode != 0:
             logger.error(f"Error fetching video info: {result.stderr}")
-            # Try alternative command without cookies option which might fail on Render
+            # Try alternative command with different extractor args
             alternative_command = [
                 "yt-dlp",
                 "--dump-json",
@@ -163,15 +182,31 @@ async def get_video_info_async(url: str):
                 "--no-warnings",
                 "--quiet",
                 "--force-ipv4",
-                "--extractor-args", "youtube:player_client=web",
-                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "--extractor-args", "youtube:player_client=android",
+                "--user-agent", "Mozilla/5.0 (Linux; Android 12; SM-S906N Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+                "--geo-bypass",
+                "--no-check-certificate",
                 str(url)
             ]
             logger.info(f"Trying alternative command for: {url}")
             result = await loop.run_in_executor(executor, run_subprocess_sync, alternative_command)
             
             if result.returncode != 0:
-                raise subprocess.CalledProcessError(result.returncode, alternative_command, result.stderr)
+                # Try a third option with simpler parameters
+                simple_command = [
+                    "yt-dlp",
+                    "--dump-single-json",
+                    "--no-playlist",
+                    "--skip-download",
+                    "--geo-bypass",
+                    "--no-check-certificate",
+                    str(url)
+                ]
+                logger.info(f"Trying simple fallback command for: {url}")
+                result = await loop.run_in_executor(executor, run_subprocess_sync, simple_command)
+                
+                if result.returncode != 0:
+                    raise subprocess.CalledProcessError(result.returncode, simple_command, result.stderr)
             
         video_data = json.loads(result.stdout)
         
@@ -518,6 +553,9 @@ async def download_and_process_video(task_id: str, url: str, output_format: str,
             # Speed optimizations
             "--no-check-certificate",
             "--prefer-insecure",
+            "--force-ipv4",
+            "--geo-bypass",
+            "--extractor-args", "youtube:player_client=web,android:player_client=android",
             url
         ]
         
@@ -808,6 +846,9 @@ async def download_and_process_audio(task_id: str, url: str, output_format: str,
             # Speed optimizations
             "--no-check-certificate",
             "--prefer-insecure",
+            "--force-ipv4",
+            "--geo-bypass",
+            "--extractor-args", "youtube:player_client=web,android:player_client=android",
             url
         ]
         
