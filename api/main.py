@@ -137,6 +137,11 @@ async def get_video_info_async(url: str):
         "--quiet",
         # Add modern user agent
         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        # Add additional options to help with extraction
+        "--force-ipv4",
+        "--extractor-args", "youtube:player_client=web",
+        # Add cookies options
+        "--cookies-from-browser", "chrome",
         str(url)
     ]
     
@@ -148,7 +153,25 @@ async def get_video_info_async(url: str):
         result = await loop.run_in_executor(executor, run_subprocess_sync, command)
         
         if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, command, result.stderr)
+            logger.error(f"Error fetching video info: {result.stderr}")
+            # Try alternative command without cookies option which might fail on Render
+            alternative_command = [
+                "yt-dlp",
+                "--dump-json",
+                "--no-playlist",
+                "--skip-download",
+                "--no-warnings",
+                "--quiet",
+                "--force-ipv4",
+                "--extractor-args", "youtube:player_client=web",
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                str(url)
+            ]
+            logger.info(f"Trying alternative command for: {url}")
+            result = await loop.run_in_executor(executor, run_subprocess_sync, alternative_command)
+            
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, alternative_command, result.stderr)
             
         video_data = json.loads(result.stdout)
         
@@ -281,8 +304,10 @@ async def get_video_info(video_info: VideoInfo, request: Request):
                 "--no-warnings",
                 "--quiet",
                 "--force-ipv4",
-                "--extractor-args", "youtube:player_client=web",
+                "--extractor-args", "youtube:player_client=web,android:player_client=android",
                 "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                # Try with geo bypass
+                "--geo-bypass",
                 str(video_info.url)
             ]
             
@@ -290,7 +315,21 @@ async def get_video_info(video_info: VideoInfo, request: Request):
             result = await loop.run_in_executor(executor, run_subprocess_sync, command)
             
             if result.returncode != 0:
-                raise subprocess.CalledProcessError(result.returncode, command, result.stderr)
+                # Try one more time with simpler options
+                simple_command = [
+                    "yt-dlp",
+                    "--dump-single-json",
+                    "--no-playlist",
+                    "--skip-download",
+                    "--geo-bypass",
+                    "--no-check-certificate",
+                    str(video_info.url)
+                ]
+                logger.info(f"Trying simple fallback command for: {video_info.url}")
+                result = await loop.run_in_executor(executor, run_subprocess_sync, simple_command)
+                
+                if result.returncode != 0:
+                    raise subprocess.CalledProcessError(result.returncode, simple_command, result.stderr)
                 
             video_data = json.loads(result.stdout)
             

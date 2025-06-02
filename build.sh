@@ -9,5 +9,7 @@ set -o errexit
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Update yt-dlp to latest version
-pip install --upgrade yt-dlp
+# Update yt-dlp to latest version and ensure it's properly installed
+pip uninstall -y yt-dlp
+pip install --no-cache-dir yt-dlp
+yt-dlp --version
