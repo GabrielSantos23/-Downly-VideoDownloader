@@ -134,6 +134,25 @@ export default function VideoForm({
       }
 
       const data = await response.json();
+
+      // Check if the API returned an error message
+      if (data.error) {
+        setError(data.error);
+        toast.error(data.error);
+        setVideoInfo(null);
+        return;
+      }
+
+      // Check if we have any video formats
+      if (data.video_formats && data.video_formats.length === 0) {
+        setError(
+          "No video formats available. This video might be unavailable or region-restricted."
+        );
+        toast.error("No video formats available");
+        setVideoInfo(null);
+        return;
+      }
+
       setVideoInfo(data);
 
       // Set video duration

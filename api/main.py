@@ -161,6 +161,10 @@ async def get_video_info_async(url: str):
         # Geo bypass and other helpful options
         "--geo-bypass",
         "--no-check-certificate",
+        # Add sleep between requests to avoid rate limiting
+        "--sleep-requests", "1",
+        "--sleep-interval", "5",
+        "--max-sleep-interval", "10",
         str(url)
     ]
     
@@ -171,8 +175,38 @@ async def get_video_info_async(url: str):
     try:
         result = await loop.run_in_executor(executor, run_subprocess_sync, command)
         
+        # Check for specific error messages
         if result.returncode != 0:
+            error_msg = result.stderr.lower() if result.stderr else ""
             logger.error(f"Error fetching video info: {result.stderr}")
+            
+            # Check if video is unavailable or rate limited
+            if "video unavailable" in error_msg or "content isn't available" in error_msg:
+                logger.warning(f"Video appears to be unavailable: {url}")
+                return {
+                    "title": "Video Unavailable",
+                    "thumbnail": None,
+                    "duration": None,
+                    "channel": "Unknown",
+                    "error": "This video is unavailable or region-restricted",
+                    "video_formats": [],
+                    "audio_formats": [],
+                    "url": str(url)
+                }
+            
+            if "too many requests" in error_msg or "429" in error_msg:
+                logger.warning(f"Rate limited by YouTube: {url}")
+                return {
+                    "title": "Rate Limited",
+                    "thumbnail": None,
+                    "duration": None,
+                    "channel": "Unknown",
+                    "error": "YouTube rate limit reached. Please try again later.",
+                    "video_formats": [],
+                    "audio_formats": [],
+                    "url": str(url)
+                }
+            
             # Try alternative command with different extractor args
             alternative_command = [
                 "yt-dlp",
@@ -186,12 +220,45 @@ async def get_video_info_async(url: str):
                 "--user-agent", "Mozilla/5.0 (Linux; Android 12; SM-S906N Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
                 "--geo-bypass",
                 "--no-check-certificate",
+                # Add sleep between requests to avoid rate limiting
+                "--sleep-requests", "2",
+                "--sleep-interval", "5",
+                "--max-sleep-interval", "10",
                 str(url)
             ]
             logger.info(f"Trying alternative command for: {url}")
             result = await loop.run_in_executor(executor, run_subprocess_sync, alternative_command)
             
             if result.returncode != 0:
+                error_msg = result.stderr.lower() if result.stderr else ""
+                
+                # Check again for specific errors
+                if "video unavailable" in error_msg or "content isn't available" in error_msg:
+                    logger.warning(f"Video confirmed unavailable: {url}")
+                    return {
+                        "title": "Video Unavailable",
+                        "thumbnail": None,
+                        "duration": None,
+                        "channel": "Unknown",
+                        "error": "This video is unavailable or region-restricted",
+                        "video_formats": [],
+                        "audio_formats": [],
+                        "url": str(url)
+                    }
+                
+                if "too many requests" in error_msg or "429" in error_msg:
+                    logger.warning(f"Rate limited by YouTube: {url}")
+                    return {
+                        "title": "Rate Limited",
+                        "thumbnail": None,
+                        "duration": None,
+                        "channel": "Unknown",
+                        "error": "YouTube rate limit reached. Please try again later.",
+                        "video_formats": [],
+                        "audio_formats": [],
+                        "url": str(url)
+                    }
+                
                 # Try a third option with simpler parameters
                 simple_command = [
                     "yt-dlp",
@@ -200,12 +267,43 @@ async def get_video_info_async(url: str):
                     "--skip-download",
                     "--geo-bypass",
                     "--no-check-certificate",
+                    # Add proxy option as last resort
+                    "--proxy", "auto",
                     str(url)
                 ]
                 logger.info(f"Trying simple fallback command for: {url}")
                 result = await loop.run_in_executor(executor, run_subprocess_sync, simple_command)
                 
                 if result.returncode != 0:
+                    error_msg = result.stderr.lower() if result.stderr else ""
+                    
+                    # Final check for specific errors
+                    if "video unavailable" in error_msg or "content isn't available" in error_msg:
+                        logger.warning(f"Video confirmed unavailable after all attempts: {url}")
+                        return {
+                            "title": "Video Unavailable",
+                            "thumbnail": None,
+                            "duration": None,
+                            "channel": "Unknown",
+                            "error": "This video is unavailable or region-restricted",
+                            "video_formats": [],
+                            "audio_formats": [],
+                            "url": str(url)
+                        }
+                    
+                    if "too many requests" in error_msg or "429" in error_msg:
+                        logger.warning(f"Rate limited by YouTube after all attempts: {url}")
+                        return {
+                            "title": "Rate Limited",
+                            "thumbnail": None,
+                            "duration": None,
+                            "channel": "Unknown",
+                            "error": "YouTube rate limit reached. Please try again later.",
+                            "video_formats": [],
+                            "audio_formats": [],
+                            "url": str(url)
+                        }
+                    
                     raise subprocess.CalledProcessError(result.returncode, simple_command, result.stderr)
             
         video_data = json.loads(result.stdout)
@@ -541,8 +639,8 @@ async def download_and_process_video(task_id: str, url: str, output_format: str,
             # Modern user agent
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             # Minimize retries for speed
-            "--retries", "2",
-            "--fragment-retries", "2",
+            "--retries", "3",
+            "--fragment-retries", "3",
             # Fast output template
             "-o", str(output_path),
             # Optimized format selection
@@ -556,6 +654,10 @@ async def download_and_process_video(task_id: str, url: str, output_format: str,
             "--force-ipv4",
             "--geo-bypass",
             "--extractor-args", "youtube:player_client=web,android:player_client=android",
+            # Add rate limiting protection
+            "--sleep-requests", "1",
+            "--sleep-interval", "3",
+            "--max-sleep-interval", "6",
             url
         ]
         
@@ -832,8 +934,8 @@ async def download_and_process_audio(task_id: str, url: str, output_format: str,
             # Modern user agent
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             # Minimize retries for speed
-            "--retries", "2",
-            "--fragment-retries", "2",
+            "--retries", "3",
+            "--fragment-retries", "3",
             # Fast output template
             "-o", str(output_path),
             # Audio-only format selection
@@ -849,6 +951,10 @@ async def download_and_process_audio(task_id: str, url: str, output_format: str,
             "--force-ipv4",
             "--geo-bypass",
             "--extractor-args", "youtube:player_client=web,android:player_client=android",
+            # Add rate limiting protection
+            "--sleep-requests", "1",
+            "--sleep-interval", "3",
+            "--max-sleep-interval", "6",
             url
         ]
         
