@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
     // Warning: This allows you to build despite TypeScript errors
     ignoreBuildErrors: true,
   },
+  env: {
+    API_BASE_URL: "https://downly-videodownloader-2.onrender.com",
+  },
 };
 
 export default nextConfig;

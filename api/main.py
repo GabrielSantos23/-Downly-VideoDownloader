@@ -41,7 +41,7 @@ app = FastAPI(
 # Setup CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -135,6 +135,8 @@ async def get_video_info_async(url: str):
         "--skip-download",
         "--no-warnings",
         "--quiet",
+        # Add modern user agent
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         str(url)
     ]
     
@@ -266,6 +268,54 @@ async def get_video_info(video_info: VideoInfo, request: Request):
         info = await get_video_info_async(str(video_info.url))
         return info
         
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error in video info endpoint (subprocess): {e}")
+        # Try again with different options if first attempt fails
+        try:
+            # Fallback command with additional options
+            command = [
+                "yt-dlp",
+                "--dump-json",
+                "--no-playlist",
+                "--skip-download",
+                "--no-warnings",
+                "--quiet",
+                "--force-ipv4",
+                "--extractor-args", "youtube:player_client=web",
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                str(video_info.url)
+            ]
+            
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(executor, run_subprocess_sync, command)
+            
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, command, result.stderr)
+                
+            video_data = json.loads(result.stdout)
+            
+            # Return basic info from fallback
+            return {
+                "title": video_data.get("title", "Video"),
+                "thumbnail": video_data.get("thumbnail"),
+                "duration": video_data.get("duration"),
+                "channel": video_data.get("channel", "Unknown"),
+                "video_formats": [{"resolution": "best", "ext": "mp4", "format_note": "", "file_size": "Unknown"}],
+                "audio_formats": [{"bitrate": "128kbps", "ext": "m4a", "file_size": "Unknown"}],
+                "url": str(video_info.url)
+            }
+        except Exception as fallback_error:
+            logger.error(f"Fallback also failed: {fallback_error}")
+            # Return basic info to avoid complete failure
+            return {
+                "title": "Video",
+                "thumbnail": None,
+                "duration": None,
+                "channel": "Unknown",
+                "video_formats": [{"resolution": "best", "ext": "mp4", "format_note": "", "file_size": "Unknown"}],
+                "audio_formats": [{"bitrate": "128kbps", "ext": "m4a", "file_size": "Unknown"}],
+                "url": str(video_info.url)
+            }
     except Exception as e:
         logger.error(f"Error in video info endpoint: {e}")
         # Return basic info to avoid complete failure
@@ -273,7 +323,9 @@ async def get_video_info(video_info: VideoInfo, request: Request):
             "title": "Video",
             "thumbnail": None,
             "duration": None,
-            "formats": ["best"],
+            "channel": "Unknown",
+            "video_formats": [{"resolution": "best", "ext": "mp4", "format_note": "", "file_size": "Unknown"}],
+            "audio_formats": [{"bitrate": "128kbps", "ext": "m4a", "file_size": "Unknown"}],
             "url": str(video_info.url)
         }
 
@@ -412,8 +464,8 @@ async def download_and_process_video(task_id: str, url: str, output_format: str,
             "yt-dlp",
             "--no-playlist",
             "--no-warnings",
-            # Fast user agent
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            # Modern user agent
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             # Minimize retries for speed
             "--retries", "2",
             "--fragment-retries", "2",
@@ -700,8 +752,8 @@ async def download_and_process_audio(task_id: str, url: str, output_format: str,
             "yt-dlp",
             "--no-playlist",
             "--no-warnings",
-            # Fast user agent
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            # Modern user agent
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             # Minimize retries for speed
             "--retries", "2",
             "--fragment-retries", "2",
